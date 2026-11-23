@@ -45,10 +45,10 @@ void InitializeConfiguration()
 	s_EnableImmersiveShellStack = dwEnableUWP;
 
 	// Taskbar pinning
-	// - Defaults to enabled (1)
+	// - Defaults to enabled (1) on older Windows builds, or 0 on Windows 11 24H2+ (Build 26100+) & Vista mode
 	// - When disabled, the behaviour is similar to Vista and earlier
 	// - Moreover, when disabled, certain jumplist actions are not shown to prevent other issues
-	DWORD dwTaskbarPinning = 1;
+	DWORD dwTaskbarPinning = (g_osVersion.BuildNumber() >= 26100) ? 0 : 1;
 	g_registry.QueryValue(L"UseTaskbarPinning", (LPBYTE)&dwTaskbarPinning, sizeof(DWORD));
 	s_UseTaskbarPinning = dwTaskbarPinning;
 

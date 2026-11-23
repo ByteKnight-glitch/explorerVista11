@@ -427,10 +427,10 @@ void CreateShellFolder()
 	}
 }
 
-// Compatibility warning for Windows 11 24H2+
+// Compatibility warning for unsupported OS builds
 void FirstRunCompatibilityWarning()
 {
-	if (g_osVersion.BuildNumber() >= 26100 || g_osVersion.BuildNumber() == 20348) // temporary one-off M2 warning for Win11 24H2 users, permanent for iron users
+	if (g_osVersion.BuildNumber() == 20348) // iron / Server 2022 warning
 	{
 		DWORD value = 0;
 		RegGetDWORD(HKEY_CURRENT_USER, c_szSubkey, L"FirstRunVersionCheck", &value);

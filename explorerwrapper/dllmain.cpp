@@ -41,6 +41,11 @@
 
 LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+	if (!g_dwTrayThreadId)
+	{
+		g_dwTrayThreadId = GetCurrentThreadId();
+		dbgprintf(L"set g_dwTrayThreadId from NewTrayProc to %u", g_dwTrayThreadId);
+	}
 	if (uMsg == 0x56D) return 0;
 	if (uMsg == ThemeChangeMessage) //reinit thememanager on themechanged, so that inactive msstyles is updated
 	{
@@ -114,6 +119,11 @@ void ShimDesktop()
 	HWND hwndThumbnail = GetThumbnailWnd(); // thumbnail hwnd not being present should not stop the shim
 	if (!hwnd_desktop || !hwndTray) return;
 	InitOnce = TRUE;
+	if (!g_dwTrayThreadId)
+	{
+		g_dwTrayThreadId = GetWindowThreadProcessId(hwndTray, NULL);
+		dbgprintf(L"set g_dwTrayThreadId from Shell_TrayWnd to %u", g_dwTrayThreadId);
+	}
 	//hook tray
 	g_prevTrayProc = (WNDPROC)GetWindowLongPtr(hwndTray, GWLP_WNDPROC);
 	g_prevThumbnailProc = (WNDPROC)GetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC);
@@ -644,6 +654,13 @@ extern "C" HRESULT WINAPI Explorer_CoCreateInstance(
 	}
 	if ((rclsid == CLSID_StartMenuPin || rclsid == CLSID_TaskbarPin) /* && riid == IID_IPinnedList2*/ && result != S_OK)
 	{
+		// In Windows Vista shell mode or when taskbar pinning is disabled,
+		// avoid probing CLSID_TaskbarPin which prevents hangs/crashes on Windows 11 24H2+
+		if (!s_UseTaskbarPinning && rclsid == CLSID_TaskbarPin)
+		{
+			return E_FAIL;
+		}
+
 		int build = g_osVersion.BuildNumber();
 		IID id = IID_IPinnedList25;
 

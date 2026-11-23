@@ -335,6 +335,13 @@ void PatchTwinUI()
 
 	// Prevent additional hotkey double-registration on Windows 11
 	ChangeImportedAddress(GetModuleHandle(L"twinui.dll"), "user32.dll", ShellRegisterHotKey, ShellRegisterHotKeyNEW);
+
+	// Windows 11 24H2+ dispatches shell hotkeys through twinui.pcshell.dll
+	HMODULE pcshell = GetModuleHandle(L"twinui.pcshell.dll");
+	if (pcshell)
+	{
+		ChangeImportedAddress(pcshell, "user32.dll", ShellRegisterHotKey, ShellRegisterHotKeyNEW);
+	}
 }
 
 // Consolidate all of the above so they can be changed at runtime as needed

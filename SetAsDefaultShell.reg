@@ -1,0 +1,5 @@
+Windows Registry Editor Version 5.00
+
+; Set Windows Vista explorer as your user-level shell on logon
+[HKEY_CURRENT_USER\Software\Microsoft\Windows NT\CurrentVersion\Winlogon]
+"Shell"="C:\\Users\\IanRo\\Desktop\\explorerVista11\\explorer.exe"

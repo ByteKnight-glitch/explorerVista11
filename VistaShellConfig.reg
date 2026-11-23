@@ -1,0 +1,34 @@
+Windows Registry Editor Version 5.00
+
+; ==============================================================================
+; Windows Vista Shell Configuration for explorer7 on Windows 11 24H2 (Build 26100)
+; ==============================================================================
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced]
+; Visual Style & Custom Start Orb
+"Theme"="vista"
+"OrbDirectory"="vista"
+
+; Vista Taskbar Behavior (Bypasses Win11 24H2 Taskband Pinning issues)
+; 0 = Disables Superbar taskbar pinning, replicating Vista's classic running tasks
+"UseTaskbarPinning"=dword:00000000
+
+; Taskbar Button Appearance (2 = Never combine buttons, displays window titles like Vista)
+"TaskbarGlomLevel"=dword:00000002
+
+; Taskbar Size (1 = Classic small icons / 30px height matching Vista)
+"TaskbarSmallIcons"=dword:00000001
+
+; Immersive / UWP Integration (0 = Hide modern apps from Vista taskbar & start menu)
+"EnableImmersive"=dword:00000000
+"StoreAppsOnTaskbar"=dword:00000000
+"StoreAppsInStart"=dword:00000000
+
+; Aero Glass & Colorization (Aero mode enabled, composition active)
+"DisableComposition"=dword:00000000
+"ClassicTheme"=dword:00000000
+"ColorizationOptions"=dword:00000000
+"AcrylicColorization"=dword:00000000
+
+; Mark first run check as acknowledged
+"FirstRunVersionCheck"=dword:00000001
