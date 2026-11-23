@@ -35,3 +35,7 @@ Windows Registry Editor Version 5.00
 
 ; Mark first run check as acknowledged
 "FirstRunVersionCheck"=dword:00000001
+
+[HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer]
+; Auto-hide inactive notification icons on the taskbar (1 = Enabled, Vista/7 style)
+"EnableAutoTray"=dword:00000001

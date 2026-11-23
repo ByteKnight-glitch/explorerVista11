@@ -56,7 +56,7 @@ SIZE AdjustWindowRectForTaskbar(RECT* lprc)
 	return { dx, dy };
 }
 
-// Adjust by 8 pixels accordingly
+// Keep tray flyouts attached/flush to the taskbar (Vista style)
 BOOL WINAPI CalculatePopupWindowPositionNEW(
 	const POINT* anchorPoint,
 	const SIZE* windowSize,
@@ -65,16 +65,10 @@ BOOL WINAPI CalculatePopupWindowPositionNEW(
 	RECT* popupWindowPosition
 )
 {
-	BOOL res = CalculatePopupWindowPosition(
+	return CalculatePopupWindowPosition(
 		anchorPoint, windowSize, flags,
 		excludeRect, popupWindowPosition
 	);
-	if ((IsThemeActive() && !s_ClassicTheme && IsCompositionActive() && !s_DisableComposition) && res && (flags & TPM_WORKAREA) != 0)
-	{
-		SIZE adjust = AdjustWindowRectForTaskbar(popupWindowPosition);
-		OffsetRect(popupWindowPosition, adjust.cx, adjust.cy);
-	}
-	return res;
 }
 
 // Additional helper for removing immersive menus. Better inter-operability between Windows versions. Used alongside the pattern method.

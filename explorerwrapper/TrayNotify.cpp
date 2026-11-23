@@ -88,18 +88,26 @@ HRESULT STDMETHODCALLTYPE CTrayNotifyFactory::CreateInstance( IUnknown * pUnkOut
 	if ( pUnkOuter ) return CLASS_E_NOAGGREGATION;
 	if (riid == IID_IUnknown)
 	{
-		IUnknown* obj;
-		HRESULT ret = m_origfactory->CreateInstance(pUnkOuter,IID_IUnknown,(PVOID*)&obj);
-		if (ret == S_OK)
+		IUnknown* obj = nullptr;
+		HRESULT ret = m_origfactory->CreateInstance(pUnkOuter, IID_IUnknown, (PVOID*)&obj);
+		if (ret == S_OK && obj)
 		{
-			ITrayNotify7* oldnotify;
-			ret = obj->QueryInterface(IID_ITrayNotify7,(PVOID*)&oldnotify);
-			if (ret == S_OK)
+			ITrayNotify7* oldnotify = nullptr;
+			if (SUCCEEDED(obj->QueryInterface(IID_ITrayNotify7, (PVOID*)&oldnotify)) && oldnotify)
+			{
 				*ppvObject = new CTrayNotifyWrapper(oldnotify);
+				obj->Release();
+			}
+			else
+			{
+				// Vista CTrayNotify does not implement ITrayNotify7; pass through the underlying instance cleanly
+				*ppvObject = obj;
+			}
+			return S_OK;
 		}
 		return ret;
 	}
-	return E_FAIL; //BUGBUG BUGBUG BUGBUG BUGBUG BUGBUG
+	return m_origfactory->CreateInstance(pUnkOuter, riid, ppvObject);
 }
 
 HRESULT STDMETHODCALLTYPE CTrayNotifyFactory::LockServer( BOOL fLock )
