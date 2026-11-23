@@ -40,6 +40,62 @@
 #include "TypeDefinitions.h"
 
 #define WINX_HOTKEY_ID 0x5758
+#define WM_SHOW_CUSTOM_WINX (WM_USER + 0x575)
+static HWND g_hwndTrayWinX = NULL;
+static HHOOK g_hWinXKeyHook = NULL;
+
+static void AppendDiagLog(LPCWSTR line)
+{
+	WCHAR path[MAX_PATH];
+	DWORD len = GetTempPathW(MAX_PATH, path);
+	if (!len || len >= MAX_PATH - 32) return;
+	lstrcatW(path, L"explorerVista_com.log");
+
+	HANDLE hFile = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hFile == INVALID_HANDLE_VALUE) return;
+
+	char utf8[512];
+	int n = WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8, sizeof(utf8) - 1, NULL, NULL);
+	if (n > 1)
+	{
+		DWORD written = 0;
+		WriteFile(hFile, utf8, (DWORD)(n - 1), &written, NULL);
+	}
+	CloseHandle(hFile);
+}
+
+static void LogFailedComCall(REFCLSID rclsid, REFIID riid, HRESULT hr)
+{
+	static LONG s_logCount = 0;
+	if (InterlockedIncrement(&s_logCount) > 300) return;
+
+	WCHAR clsidStr[64] = { 0 };
+	WCHAR iidStr[64] = { 0 };
+	StringFromGUID2(rclsid, clsidStr, 64);
+	StringFromGUID2(riid, iidStr, 64);
+
+	WCHAR line[256];
+	wsprintfW(line, L"[COM FAIL] CLSID=%s IID=%s HR=0x%08X\r\n", clsidStr, iidStr, (unsigned int)hr);
+	AppendDiagLog(line);
+}
+
+LRESULT CALLBACK WinXKeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+	if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN))
+	{
+		KBDLLHOOKSTRUCT* pKbd = (KBDLLHOOKSTRUCT*)lParam;
+		if (pKbd && pKbd->vkCode == 'X' &&
+			((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000)))
+		{
+			if (g_hwndTrayWinX && IsWindow(g_hwndTrayWinX))
+			{
+				PostMessageW(g_hwndTrayWinX, WM_SHOW_CUSTOM_WINX, 0, 0);
+				return 1;
+			}
+		}
+	}
+	return CallNextHookEx(g_hWinXKeyHook, nCode, wParam, lParam);
+}
 
 void ShowCustomWinXMenu(HWND hwndTray)
 {
@@ -118,7 +174,16 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		g_dwTrayThreadId = GetCurrentThreadId();
 		dbgprintf(L"set g_dwTrayThreadId from NewTrayProc to %u", g_dwTrayThreadId);
 	}
-	if (uMsg == WM_HOTKEY && wParam == WINX_HOTKEY_ID)
+	if (!g_hWinXKeyHook && hwnd == GetTaskbarWnd())
+	{
+		g_hwndTrayWinX = hwnd;
+		g_hWinXKeyHook = SetWindowsHookExW(WH_KEYBOARD_LL, WinXKeyboardHookProc, g_hInstance, 0);
+		BOOL hkOk = RegisterHotKey(hwnd, WINX_HOTKEY_ID, MOD_WIN, 'X');
+		WCHAR msg[128];
+		wsprintfW(msg, L"[WINX] TrayThread=%u Hook=%p RegisterHotKey=%d\r\n", GetCurrentThreadId(), g_hWinXKeyHook, hkOk);
+		AppendDiagLog(msg);
+	}
+	if ((uMsg == WM_HOTKEY && wParam == WINX_HOTKEY_ID) || uMsg == WM_SHOW_CUSTOM_WINX)
 	{
 		ShowCustomWinXMenu(hwnd);
 		return 0;
@@ -126,6 +191,11 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	if (uMsg == WM_DESTROY)
 	{
 		UnregisterHotKey(hwnd, WINX_HOTKEY_ID);
+		if (g_hWinXKeyHook)
+		{
+			UnhookWindowsHookEx(g_hWinXKeyHook);
+			g_hWinXKeyHook = NULL;
+		}
 	}
 	if (uMsg == 0x56D) return 0;
 	if (uMsg == ThemeChangeMessage) //reinit thememanager on themechanged, so that inactive msstyles is updated
@@ -210,7 +280,6 @@ void ShimDesktop()
 	g_prevThumbnailProc = (WNDPROC)GetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC);
 	SetWindowLongPtr(hwndTray, GWLP_WNDPROC, (LONG_PTR)NewTrayProc);
 	SetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC, (LONG_PTR)NewThumbnailProc);
-	RegisterHotKey(hwndTray, WINX_HOTKEY_ID, MOD_WIN, 'X');
 	//set monitor (doh!)
 	SetProp(hwndTray, L"TaskbarMonitor", (HANDLE)MonitorFromWindow(hwndTray, MONITOR_DEFAULTTOPRIMARY));
 	//init desktop	
@@ -836,6 +905,11 @@ extern "C" HRESULT WINAPI Explorer_CoCreateInstance(
 	}
 	if (riid == IID_TrayClock7 && result != S_OK)
 		result = CoCreateInstance(rclsid, pUnkOuter, dwClsContext, IID_TrayClock8, ppv);
+
+	if (FAILED(result))
+	{
+		LogFailedComCall(rclsid, riid, result);
+	}
 
 	return result;
 }
