@@ -41,8 +41,15 @@
 
 #define WINX_HOTKEY_ID 0x5758
 #define WM_SHOW_CUSTOM_WINX (WM_USER + 0x575)
+#define WM_CUSTOM_SNAP (WM_USER + 0x576)
 static HWND g_hwndTrayWinX = NULL;
 static HHOOK g_hWinXKeyHook = NULL;
+static HWINEVENTHOOK g_hSnapWinEventHook = NULL;
+static HWND g_snapDragHwnd = NULL;
+static RECT g_snapDragStartRect = { 0 };
+static HWND g_lastSnappedHwnd = NULL;
+static RECT g_lastSnappedRestoreRect = { 0 };
+static int g_lastSnappedSide = 0; // 0 = none, 1 = left, 2 = right
 
 static void AppendDiagLog(LPCWSTR line)
 {
@@ -79,18 +86,288 @@ static void LogFailedComCall(REFCLSID rclsid, REFIID riid, HRESULT hr)
 	AppendDiagLog(line);
 }
 
+static int ClampPad(LONG v)
+{
+	if (v < 0) return 0;
+	if (v > 32) return 32;
+	return (int)v;
+}
+
+static bool IsSnappableWindow(HWND hwnd, bool requireThickFrame)
+{
+	if (!hwnd || !IsWindow(hwnd) || !IsWindowVisible(hwnd))
+		return false;
+
+	if (GetAncestor(hwnd, GA_ROOT) != hwnd)
+		return false;
+
+	LONG style = GetWindowLongW(hwnd, GWL_STYLE);
+	LONG exStyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
+	if ((style & WS_CHILD) || (exStyle & WS_EX_NOACTIVATE) || (exStyle & WS_EX_TOOLWINDOW))
+		return false;
+
+	if (requireThickFrame)
+	{
+		if ((style & WS_THICKFRAME) == 0)
+			return false;
+	}
+	else
+	{
+		if ((style & (WS_THICKFRAME | WS_MAXIMIZEBOX)) == 0)
+			return false;
+	}
+
+	WCHAR cls[64] = { 0 };
+	if (GetClassNameW(hwnd, cls, ARRAYSIZE(cls)))
+	{
+		static const LPCWSTR s_excludedClasses[] = {
+			L"Shell_TrayWnd",
+			L"Shell_SecondaryTrayWnd",
+			L"Progman",
+			L"WorkerW",
+			L"DV2ControlHost",
+			L"TaskListThumbnailWnd",
+			L"#32768"
+		};
+		for (size_t i = 0; i < ARRAYSIZE(s_excludedClasses); ++i)
+		{
+			if (lstrcmpW(cls, s_excludedClasses[i]) == 0)
+				return false;
+		}
+	}
+
+	return true;
+}
+
+static void ApplySnappedRect(HWND hwnd, const RECT& target)
+{
+	if (IsZoomed(hwnd) || IsIconic(hwnd))
+		ShowWindow(hwnd, SW_RESTORE);
+
+	RECT winRect = { 0 };
+	RECT frameRect = { 0 };
+	GetWindowRect(hwnd, &winRect);
+
+	int padL = 0, padT = 0, padR = 0, padB = 0;
+	if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &frameRect, sizeof(frameRect))))
+	{
+		padL = ClampPad(frameRect.left - winRect.left);
+		padT = ClampPad(frameRect.top - winRect.top);
+		padR = ClampPad(winRect.right - frameRect.right);
+		padB = ClampPad(winRect.bottom - frameRect.bottom);
+	}
+
+	int x = target.left - padL;
+	int y = target.top - padT;
+	int w = (target.right - target.left) + padL + padR;
+	int h = (target.bottom - target.top) + padT + padB;
+	SetWindowPos(hwnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+static bool RestoreSnappedWindow(HWND hwnd)
+{
+	if (hwnd != g_lastSnappedHwnd || g_lastSnappedSide == 0)
+		return false;
+	if (g_lastSnappedRestoreRect.right <= g_lastSnappedRestoreRect.left)
+		return false;
+
+	SetWindowPos(
+		hwnd,
+		NULL,
+		g_lastSnappedRestoreRect.left,
+		g_lastSnappedRestoreRect.top,
+		g_lastSnappedRestoreRect.right - g_lastSnappedRestoreRect.left,
+		g_lastSnappedRestoreRect.bottom - g_lastSnappedRestoreRect.top,
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED
+	);
+	g_lastSnappedHwnd = NULL;
+	g_lastSnappedSide = 0;
+	return true;
+}
+
+static void SnapWindowToEdge(HWND hwnd, int side, HMONITOR hMonOverride, const RECT* pPreSnapRect)
+{
+	if (!IsSnappableWindow(hwnd, true))
+		return;
+
+	if (hwnd != g_lastSnappedHwnd || g_lastSnappedSide == 0)
+	{
+		if (pPreSnapRect)
+			g_lastSnappedRestoreRect = *pPreSnapRect;
+		else if (!IsZoomed(hwnd) && !IsIconic(hwnd))
+			GetWindowRect(hwnd, &g_lastSnappedRestoreRect);
+	}
+
+	HMONITOR hMon = hMonOverride ? hMonOverride : MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+	MONITORINFO mi = { sizeof(mi) };
+	if (!GetMonitorInfoW(hMon, &mi))
+		return;
+
+	RECT wa = mi.rcWork;
+	int midX = wa.left + (wa.right - wa.left) / 2;
+	RECT target;
+	if (side == 1)
+		target = { wa.left, wa.top, midX, wa.bottom };
+	else
+		target = { midX, wa.top, wa.right, wa.bottom };
+
+	ApplySnappedRect(hwnd, target);
+	g_lastSnappedHwnd = hwnd;
+	g_lastSnappedSide = side;
+}
+
+static void HandleSnapHotkey(UINT vkCode)
+{
+	HWND hwnd = GetForegroundWindow();
+	if (!IsSnappableWindow(hwnd, false))
+		return;
+
+	switch (vkCode)
+	{
+	case VK_UP:
+		if (IsIconic(hwnd))
+		{
+			ShowWindow(hwnd, SW_RESTORE);
+		}
+		else if (GetWindowLongW(hwnd, GWL_STYLE) & WS_MAXIMIZEBOX)
+		{
+			ShowWindow(hwnd, SW_MAXIMIZE);
+			if (hwnd == g_lastSnappedHwnd)
+				g_lastSnappedSide = 0;
+		}
+		break;
+
+	case VK_DOWN:
+		if (IsZoomed(hwnd))
+		{
+			ShowWindow(hwnd, SW_RESTORE);
+		}
+		else if (!RestoreSnappedWindow(hwnd) && (GetWindowLongW(hwnd, GWL_STYLE) & WS_MINIMIZEBOX))
+		{
+			ShowWindow(hwnd, SW_MINIMIZE);
+		}
+		break;
+
+	case VK_LEFT:
+		if (g_lastSnappedSide == 2 && RestoreSnappedWindow(hwnd))
+			break;
+		SnapWindowToEdge(hwnd, 1, NULL, NULL);
+		break;
+
+	case VK_RIGHT:
+		if (g_lastSnappedSide == 1 && RestoreSnappedWindow(hwnd))
+			break;
+		SnapWindowToEdge(hwnd, 2, NULL, NULL);
+		break;
+	}
+}
+
+static VOID CALLBACK SnapWinEventProc(
+	HWINEVENTHOOK hWinEventHook,
+	DWORD event,
+	HWND hwnd,
+	LONG idObject,
+	LONG idChild,
+	DWORD dwEventThread,
+	DWORD dwmsEventTime)
+{
+	if (idObject != OBJID_WINDOW || idChild != CHILDID_SELF || !hwnd)
+		return;
+
+	if (event == EVENT_SYSTEM_MOVESIZESTART)
+	{
+		if (IsSnappableWindow(hwnd, true) && !IsZoomed(hwnd) && !IsIconic(hwnd))
+		{
+			g_snapDragHwnd = hwnd;
+			GetWindowRect(hwnd, &g_snapDragStartRect);
+		}
+		else
+		{
+			g_snapDragHwnd = NULL;
+		}
+		return;
+	}
+
+	if (event == EVENT_SYSTEM_MOVESIZEEND)
+	{
+		if (hwnd != g_snapDragHwnd)
+			return;
+		g_snapDragHwnd = NULL;
+
+		if (!IsSnappableWindow(hwnd, true) || IsZoomed(hwnd) || IsIconic(hwnd))
+			return;
+
+		RECT endRect = { 0 };
+		GetWindowRect(hwnd, &endRect);
+
+		int startW = g_snapDragStartRect.right - g_snapDragStartRect.left;
+		int startH = g_snapDragStartRect.bottom - g_snapDragStartRect.top;
+		int endW = endRect.right - endRect.left;
+		int endH = endRect.bottom - endRect.top;
+		int dw = (startW > endW) ? (startW - endW) : (endW - startW);
+		int dh = (startH > endH) ? (startH - endH) : (endH - startH);
+
+		if ((endRect.left == g_snapDragStartRect.left && endRect.top == g_snapDragStartRect.top) || dw > 4 || dh > 4)
+			return;
+
+		POINT pt = { 0 };
+		GetCursorPos(&pt);
+		HMONITOR hMon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+		MONITORINFO mi = { sizeof(mi) };
+		if (!GetMonitorInfoW(hMon, &mi))
+			return;
+
+		const int edge = 8;
+		if (pt.x <= mi.rcMonitor.left + edge)
+		{
+			SnapWindowToEdge(hwnd, 1, hMon, &g_snapDragStartRect);
+		}
+		else if (pt.x >= mi.rcMonitor.right - edge - 1)
+		{
+			SnapWindowToEdge(hwnd, 2, hMon, &g_snapDragStartRect);
+		}
+		else if (pt.y <= mi.rcMonitor.top + edge)
+		{
+			if (GetWindowLongW(hwnd, GWL_STYLE) & WS_MAXIMIZEBOX)
+			{
+				ShowWindow(hwnd, SW_MAXIMIZE);
+				if (hwnd == g_lastSnappedHwnd)
+					g_lastSnappedSide = 0;
+			}
+		}
+		else if (hwnd == g_lastSnappedHwnd)
+		{
+			g_lastSnappedSide = 0;
+		}
+	}
+}
+
 LRESULT CALLBACK WinXKeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam)
 {
 	if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN))
 	{
 		KBDLLHOOKSTRUCT* pKbd = (KBDLLHOOKSTRUCT*)lParam;
-		if (pKbd && pKbd->vkCode == 'X' &&
-			((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000)))
+		bool winHeld = ((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000));
+		if (pKbd && winHeld)
 		{
-			if (g_hwndTrayWinX && IsWindow(g_hwndTrayWinX))
+			if (pKbd->vkCode == 'X')
 			{
-				PostMessageW(g_hwndTrayWinX, WM_SHOW_CUSTOM_WINX, 0, 0);
-				return 1;
+				if (g_hwndTrayWinX && IsWindow(g_hwndTrayWinX))
+				{
+					PostMessageW(g_hwndTrayWinX, WM_SHOW_CUSTOM_WINX, 0, 0);
+					return 1;
+				}
+			}
+			else if ((pKbd->vkCode == VK_LEFT || pKbd->vkCode == VK_RIGHT || pKbd->vkCode == VK_UP || pKbd->vkCode == VK_DOWN) &&
+				!(GetAsyncKeyState(VK_CONTROL) & 0x8000) &&
+				!(GetAsyncKeyState(VK_MENU) & 0x8000) &&
+				!(GetAsyncKeyState(VK_SHIFT) & 0x8000))
+			{
+				if (g_hwndTrayWinX && IsWindow(g_hwndTrayWinX))
+				{
+					PostMessageW(g_hwndTrayWinX, WM_CUSTOM_SNAP, (WPARAM)pKbd->vkCode, 0);
+					return 1;
+				}
 			}
 		}
 	}
@@ -178,6 +455,18 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	{
 		g_hwndTrayWinX = hwnd;
 		g_hWinXKeyHook = SetWindowsHookExW(WH_KEYBOARD_LL, WinXKeyboardHookProc, g_hInstance, 0);
+		if (!g_hSnapWinEventHook)
+		{
+			g_hSnapWinEventHook = SetWinEventHook(
+				EVENT_SYSTEM_MOVESIZESTART,
+				EVENT_SYSTEM_MOVESIZEEND,
+				NULL,
+				SnapWinEventProc,
+				0,
+				0,
+				WINEVENT_OUTOFCONTEXT
+			);
+		}
 		BOOL hkOk = RegisterHotKey(hwnd, WINX_HOTKEY_ID, MOD_WIN, 'X');
 		WCHAR msg[128];
 		wsprintfW(msg, L"[WINX] TrayThread=%u Hook=%p RegisterHotKey=%d\r\n", GetCurrentThreadId(), g_hWinXKeyHook, hkOk);
@@ -188,6 +477,11 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		ShowCustomWinXMenu(hwnd);
 		return 0;
 	}
+	if (uMsg == WM_CUSTOM_SNAP)
+	{
+		HandleSnapHotkey((UINT)wParam);
+		return 0;
+	}
 	if (uMsg == WM_DESTROY)
 	{
 		UnregisterHotKey(hwnd, WINX_HOTKEY_ID);
@@ -195,6 +489,11 @@ LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		{
 			UnhookWindowsHookEx(g_hWinXKeyHook);
 			g_hWinXKeyHook = NULL;
+		}
+		if (g_hSnapWinEventHook)
+		{
+			UnhookWinEvent(g_hSnapWinEventHook);
+			g_hSnapWinEventHook = NULL;
 		}
 	}
 	if (uMsg == 0x56D) return 0;

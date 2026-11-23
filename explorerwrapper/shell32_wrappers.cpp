@@ -79,7 +79,9 @@ HRESULT(__stdcall* Shell32_DllGetClassObject)(REFCLSID rclsid, const IID* const 
 HRESULT __stdcall Shell32_DllGetClassObject_Hook(REFCLSID rclsid, const IID* const riid, LPVOID* ppv)
 {
 	HRESULT result = Shell32_DllGetClassObject(rclsid, riid, ppv);
-	if (result == S_OK && !g_bStartMenuPinTablePatched && rclsid == CLSID_StartMenuPin && riid && *riid == IID_IClassFactory && ppv && *ppv)
+	// Windows 11 24H2 (Build 26100+) changed CStartMenuPin's IShellExtInit vtable to 28+ slots,
+	// so overwriting it with the 26-slot CStartMenuPin table breaks Start Menu pinning/behavior.
+	if (result == S_OK && !g_bStartMenuPinTablePatched && g_osVersion.BuildNumber() < 26100 && rclsid == CLSID_StartMenuPin && riid && *riid == IID_IClassFactory && ppv && *ppv)
 	{
 		IClassFactory* origFactory = (IClassFactory*)*ppv;
 		*ppv = new CStartMenuPinClassFactory(origFactory);

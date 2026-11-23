@@ -22,8 +22,8 @@ Windows Registry Editor Version 5.00
 ; Taskbar Size (1 = Classic small icons / 30px height matching Vista)
 "TaskbarSmallIcons"=dword:00000001
 
-; Immersive / UWP Integration (EnableImmersive=1 enables Snap Windows via twinui.pcshell.dll)
-"EnableImmersive"=dword:00000001
+; Immersive / UWP Integration (0 keeps Win7 Start Menu stable on 24H2; wrp64.dll provides native Win32 Aero Snap)
+"EnableImmersive"=dword:00000000
 "StoreAppsOnTaskbar"=dword:00000000
 "StoreAppsInStart"=dword:00000001
 
