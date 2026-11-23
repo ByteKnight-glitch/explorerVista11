@@ -7,6 +7,7 @@
 CreateInstance_API CreateStartMenuPinInstance;
 PSTARTPINVTBL origStartPinVtbl;
 bool bFinished = false;
+bool g_bStartMenuPinTablePatched = false;
 //PSTARTPINVTBL newStartPinVtbl;
 
 HMODULE h_shell32;
@@ -176,57 +177,133 @@ static inline void* GetMemberFuncPtr(T Func) { return reinterpret_cast<void*&>(F
 #define MEMBER_FUNC(a) GetMemberFuncPtr(&a)
 
 #pragma function(memcpy)
+void StartMenuPin_PatchInstance(IUnknown* pinobj)
+{
+	if (!pinobj)
+		return;
+
+	int SetChangeCountIndex = 4 * sizeof(uintptr_t);
+	int OpenPinRegStreamIndex = 5 * sizeof(uintptr_t);
+	int OpenLinksRegStreamIndex = 6 * sizeof(uintptr_t);
+	int GetPinStreamVersionIndex = 8 * sizeof(uintptr_t);
+	int SetPinStreamVersionIndex = 9 * sizeof(uintptr_t);
+	int GetBackupSubDirNameIndex = 12 * sizeof(uintptr_t);
+	int IsRestrictedIndex = 14 * sizeof(uintptr_t);
+	int GetMenuStringIDIndex = 16 * sizeof(uintptr_t);
+	int GetHelpTextIndex = 17 * sizeof(uintptr_t);
+	int GetChangeCountIndex = 18 * sizeof(uintptr_t);
+	int GetVerbIndex = 19 * sizeof(uintptr_t);
+	int SetRemovedChangeCountIndex = 21 * sizeof(uintptr_t);
+	int GetRemovedChangeCountIndex = 22 * sizeof(uintptr_t);
+
+	PSTARTPINOBJ startobj = (PSTARTPINOBJ)pinobj;
+	PSTARTPINVTBL ogTable = startobj->pStartPinVtbl;
+	dbgprintf(L"CreateStartMenuPin pStartPinVtbl %p %p setchangecount %p",startobj,startobj->pStartPinVtbl, startobj->pStartPinVtbl->SetChangeCount);
+	static CStartMenuPin* HackHack = new CStartMenuPin();
+	startobj->pStartPinVtbl = *(PSTARTPINVTBL*)(HackHack);
+
+	fGetMenuStringID = decltype(fGetMenuStringID)(ogTable->GetMenuStringID);
+	if (!bFinished) //only needs to be done once
+	{
+		DetourVtable(startobj->pStartPinVtbl, 0 * 8, ogTable->QueryInterface);
+		DetourVtable(startobj->pStartPinVtbl, 1 * 8, ogTable->AddRef);
+		DetourVtable(startobj->pStartPinVtbl, 2 * 8, ogTable->Release);
+		DetourVtable(startobj->pStartPinVtbl, 3 * 8, ogTable->Initialize);
+		DetourVtable(startobj->pStartPinVtbl, 7 * 8, ogTable->NotifyPinListChange);
+		DetourVtable(startobj->pStartPinVtbl, 10 * 8, ogTable->Unimpl1);
+		DetourVtable(startobj->pStartPinVtbl, 11 * 8, ogTable->UpgradeItem);
+		DetourVtable(startobj->pStartPinVtbl, 13 * 8, ogTable->IsAcceptableTarget);
+		DetourVtable(startobj->pStartPinVtbl, 15 * 8, ogTable->Unimpl2);
+		DetourVtable(startobj->pStartPinVtbl, 20 * 8, ogTable->SendPinRearrangeSQM);
+		DetourVtable(startobj->pStartPinVtbl, 23 * 8, ogTable->GetPinnedAppSQMEventID);
+		if (g_osVersion.BuildNumber() >= 17763)
+		{
+			DetourVtable(startobj->pStartPinVtbl, 24 * 8, ogTable->AppliesTo);
+			DetourVtable(startobj->pStartPinVtbl, 25 * 8, ogTable->v_GetPinListMutexName);
+		}
+		bFinished = true;
+	}
+}
+
+CStartMenuPinClassFactory::CStartMenuPinClassFactory(IClassFactory* origFactory)
+{
+	m_cRef = 1;
+	m_origFactory = origFactory;
+	if (m_origFactory)
+		m_origFactory->AddRef();
+}
+
+CStartMenuPinClassFactory::~CStartMenuPinClassFactory()
+{
+	if (m_origFactory)
+		m_origFactory->Release();
+}
+
+HRESULT STDMETHODCALLTYPE CStartMenuPinClassFactory::QueryInterface(REFIID riid, void** ppvObject)
+{
+	if (!ppvObject)
+		return E_POINTER;
+
+	if (riid == IID_IUnknown || riid == IID_IClassFactory)
+	{
+		*ppvObject = static_cast<IClassFactory*>(this);
+		AddRef();
+		return S_OK;
+	}
+
+	return m_origFactory ? m_origFactory->QueryInterface(riid, ppvObject) : E_NOINTERFACE;
+}
+
+ULONG STDMETHODCALLTYPE CStartMenuPinClassFactory::AddRef(void)
+{
+	return InterlockedIncrement(&m_cRef);
+}
+
+ULONG STDMETHODCALLTYPE CStartMenuPinClassFactory::Release(void)
+{
+	ULONG ref = InterlockedDecrement(&m_cRef);
+	if (ref == 0)
+		delete this;
+	return ref;
+}
+
+HRESULT STDMETHODCALLTYPE CStartMenuPinClassFactory::CreateInstance(IUnknown* pUnkOuter, REFIID riid, void** ppvObject)
+{
+	if (!m_origFactory)
+		return E_FAIL;
+
+	if (pUnkOuter)
+		return CLASS_E_NOAGGREGATION;
+
+	IUnknown* pinobj = nullptr;
+	HRESULT rslt = m_origFactory->CreateInstance(pUnkOuter, IID_IShellExtInit, (PVOID*)&pinobj);
+	if (SUCCEEDED(rslt) && pinobj)
+	{
+		StartMenuPin_PatchInstance(pinobj);
+		rslt = pinobj->QueryInterface(riid, ppvObject);
+		pinobj->Release();
+		return rslt;
+	}
+
+	return m_origFactory->CreateInstance(pUnkOuter, riid, ppvObject);
+}
+
+HRESULT STDMETHODCALLTYPE CStartMenuPinClassFactory::LockServer(BOOL fLock)
+{
+	return m_origFactory ? m_origFactory->LockServer(fLock) : E_FAIL;
+}
+
 HRESULT WINAPI NewCreateStartMenuPinInstance(PVOID dummy,REFIID riid,PVOID* ppv)
 {
 	dbgprintf(L"StartMenuPin: NewCreateStartMenuPinInstance");
-	IUnknown* pinobj;
+	IUnknown* pinobj = nullptr;
 	HRESULT rslt = CreateStartMenuPinInstance(dummy,IID_IShellExtInit,(PVOID*)&pinobj);
-	if ( SUCCEEDED(rslt))
+	if (SUCCEEDED(rslt) && pinobj)
 	{
-		int SetChangeCountIndex = 4 * sizeof(uintptr_t);
-		int OpenPinRegStreamIndex = 5 * sizeof(uintptr_t);
-		int OpenLinksRegStreamIndex = 6 * sizeof(uintptr_t);
-		int GetPinStreamVersionIndex = 8 * sizeof(uintptr_t);
-		int SetPinStreamVersionIndex = 9 * sizeof(uintptr_t);
-		int GetBackupSubDirNameIndex = 12 * sizeof(uintptr_t);
-		int IsRestrictedIndex = 14 * sizeof(uintptr_t);
-		int GetMenuStringIDIndex = 16 * sizeof(uintptr_t);
-		int GetHelpTextIndex = 17 * sizeof(uintptr_t);
-		int GetChangeCountIndex = 18 * sizeof(uintptr_t);
-		int GetVerbIndex = 19 * sizeof(uintptr_t);
-		int SetRemovedChangeCountIndex = 21 * sizeof(uintptr_t);
-		int GetRemovedChangeCountIndex = 22 * sizeof(uintptr_t);
-
-		PSTARTPINOBJ startobj = (PSTARTPINOBJ)pinobj;
-		PSTARTPINVTBL ogTable = startobj->pStartPinVtbl;
-		dbgprintf(L"CreateStartMenuPin pStartPinVtbl %p %p setchangecount %p",startobj,startobj->pStartPinVtbl, startobj->pStartPinVtbl->SetChangeCount);
-		static CStartMenuPin* HackHack = new CStartMenuPin();
-		startobj->pStartPinVtbl = *(PSTARTPINVTBL*)(HackHack);
-
-		fGetMenuStringID = decltype(fGetMenuStringID)(ogTable->GetMenuStringID);
-		if (!bFinished) //only needs to be done once
-		{
-			DetourVtable(startobj->pStartPinVtbl, 0 * 8, ogTable->QueryInterface);
-			DetourVtable(startobj->pStartPinVtbl, 1 * 8, ogTable->AddRef);
-			DetourVtable(startobj->pStartPinVtbl, 2 * 8, ogTable->Release);
-			DetourVtable(startobj->pStartPinVtbl, 3 * 8, ogTable->Initialize);
-			DetourVtable(startobj->pStartPinVtbl, 7 * 8, ogTable->NotifyPinListChange);
-			DetourVtable(startobj->pStartPinVtbl, 10 * 8, ogTable->Unimpl1);
-			DetourVtable(startobj->pStartPinVtbl, 11 * 8, ogTable->UpgradeItem);
-			DetourVtable(startobj->pStartPinVtbl, 13 * 8, ogTable->IsAcceptableTarget);
-			DetourVtable(startobj->pStartPinVtbl, 15 * 8, ogTable->Unimpl2);
-			DetourVtable(startobj->pStartPinVtbl, 20 * 8, ogTable->SendPinRearrangeSQM);
-			DetourVtable(startobj->pStartPinVtbl, 23 * 8, ogTable->GetPinnedAppSQMEventID);
-			if (g_osVersion.BuildNumber() >= 17763)
-			{
-				DetourVtable(startobj->pStartPinVtbl, 24 * 8, ogTable->AppliesTo);
-				DetourVtable(startobj->pStartPinVtbl, 25 * 8, ogTable->v_GetPinListMutexName);
-			}
-			bFinished = true;
-		}
+		StartMenuPin_PatchInstance(pinobj);
+		rslt = pinobj->QueryInterface(riid, ppv);
+		pinobj->Release();
 	}
-	rslt = pinobj->QueryInterface(riid, ppv);
-	pinobj->Release();
 	return rslt;
 }
 
@@ -271,6 +348,7 @@ void StartMenuPin_PatchShell32()
 			CreateStartMenuPinInstance = table->CreateFunc;
 			dbgprintf(L"CreateStartMenuPinInstance = %p",CreateStartMenuPinInstance);
 			table->CreateFunc = NewCreateStartMenuPinInstance;
+			g_bStartMenuPinTablePatched = true;
 			break;
 		}
 		table++;

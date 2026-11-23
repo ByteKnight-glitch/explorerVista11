@@ -3,6 +3,7 @@
 #include "dbgprint.h"
 #include "OSVersion.h"
 #include "shell32_wrappers.h"
+#include "StartMenuPin.h"
 #include "AugmentedShellFolder.h"
 #include "MinHook.h"
 #include "KnownFolders.h"
@@ -78,6 +79,13 @@ HRESULT(__stdcall* Shell32_DllGetClassObject)(REFCLSID rclsid, const IID* const 
 HRESULT __stdcall Shell32_DllGetClassObject_Hook(REFCLSID rclsid, const IID* const riid, LPVOID* ppv)
 {
 	HRESULT result = Shell32_DllGetClassObject(rclsid, riid, ppv);
+	if (result == S_OK && !g_bStartMenuPinTablePatched && rclsid == CLSID_StartMenuPin && riid && *riid == IID_IClassFactory && ppv && *ppv)
+	{
+		IClassFactory* origFactory = (IClassFactory*)*ppv;
+		*ppv = new CStartMenuPinClassFactory(origFactory);
+		origFactory->Release();
+		return S_OK;
+	}
 	if (result != S_OK && (rclsid == CLSID_ProgramsFolderAndFastItems || rclsid == CLSID_ProgramsFolder || rclsid == CLSID_StartMenuFolder))
 	{
 		*ppv = new CProgramsFolderClassFactory(rclsid);

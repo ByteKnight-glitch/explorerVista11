@@ -18,6 +18,27 @@ typedef HRESULT (WINAPI* CreateInstance_API)(PVOID,REFIID,PVOID*);
 	} SHELLGUIDS, *PSHELLGUIDS; 
 
 void StartMenuPin_PatchShell32();
+void StartMenuPin_PatchInstance(IUnknown* pinobj);
+extern bool g_bStartMenuPinTablePatched;
+
+class CStartMenuPinClassFactory : public IClassFactory
+{
+public:
+	CStartMenuPinClassFactory(IClassFactory* origFactory);
+	~CStartMenuPinClassFactory();
+
+	// IUnknown
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppvObject);
+	STDMETHODIMP_(ULONG) AddRef(void);
+	STDMETHODIMP_(ULONG) Release(void);
+
+	// IClassFactory
+	STDMETHODIMP CreateInstance(IUnknown* pUnkOuter, REFIID riid, void** ppvObject);
+	STDMETHODIMP LockServer(BOOL fLock);
+private:
+	IClassFactory* m_origFactory;
+	long m_cRef;
+};
 
 /*MIDL_INTERFACE("00000000-0000-0000-0000-000000000000")
 IContextMenuShort

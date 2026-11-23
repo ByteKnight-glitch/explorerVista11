@@ -6,7 +6,7 @@ Windows Registry Editor Version 5.00
 
 [HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced]
 ; Visual Style & Custom Start Orb
-"Theme"="vista"
+"Theme"="aero"
 "OrbDirectory"="vista"
 
 ; Vista Taskbar Behavior (Bypasses Win11 24H2 Taskband Pinning issues)
@@ -22,15 +22,41 @@ Windows Registry Editor Version 5.00
 ; Taskbar Size (1 = Classic small icons / 30px height matching Vista)
 "TaskbarSmallIcons"=dword:00000001
 
-; Immersive / UWP Integration (0 = Hide modern apps from Vista taskbar & start menu)
-"EnableImmersive"=dword:00000000
+; Immersive / UWP Integration (EnableImmersive=1 enables Snap Windows via twinui.pcshell.dll)
+"EnableImmersive"=dword:00000001
 "StoreAppsOnTaskbar"=dword:00000000
-"StoreAppsInStart"=dword:00000000
+"StoreAppsInStart"=dword:00000001
+
+; Snap Windows (Aero Snap)
+"SnapAssist"=dword:00000001
+"JointResize"=dword:00000001
+"SnapFill"=dword:00000001
+"EnableSnapAssistFlyout"=dword:00000001
+
+; Start Menu & Search (Vista/7 population, MFU tracking, and search)
+"Start_TrackProgs"=dword:00000001
+"Start_TrackDocs"=dword:00000001
+"Start_MinMFU"=dword:0000000a
+"Start_LargeMFUIcons"=dword:00000001
+"Start_SearchPrograms"=dword:00000001
+"Start_SearchFiles"=dword:00000002
+"Start_ShowUser"=dword:00000001
+"Start_ShowMyDocs"=dword:00000001
+"Start_ShowMyPics"=dword:00000001
+"Start_ShowMyMusic"=dword:00000001
+"Start_ShowMyGames"=dword:00000001
+"Start_ShowMyComputer"=dword:00000001
+"Start_ShowNetConn"=dword:00000001
+"Start_ShowControlPanel"=dword:00000001
+"Start_ShowSetProgramAccessAndDefaults"=dword:00000001
+"Start_ShowHelp"=dword:00000001
+"Start_ShowRun"=dword:00000001
+"Start_ShowSearch"=dword:00000001
 
 ; Aero Glass & Colorization (Aero mode enabled, composition active)
 "DisableComposition"=dword:00000000
 "ClassicTheme"=dword:00000000
-"ColorizationOptions"=dword:00000000
+"ColorizationOptions"=dword:00000001
 "AcrylicColorization"=dword:00000000
 
 ; Mark first run check as acknowledged
