@@ -13,6 +13,9 @@ Windows Registry Editor Version 5.00
 ; 0 = Disables Superbar taskbar pinning, replicating Vista's classic running tasks
 "UseTaskbarPinning"=dword:00000000
 
+; Taskbar Lock State (1 = Unlocked so Toolbars like Quick Launch / Desktop can be added & moved)
+"TaskbarSizeMove"=dword:00000001
+
 ; Taskbar Button Appearance (2 = Never combine buttons, displays window titles like Vista)
 "TaskbarGlomLevel"=dword:00000002
 

@@ -4,6 +4,7 @@
 
 #pragma region GUID definitions
 DEFINE_GUID(CLSID_TaskbandPin, 0x90AA3A4E, 0x1CBA, 0x4233, 0xB8, 0xBB, 0x53, 0x57, 0x73, 0xD4, 0x84, 0x49);
+DEFINE_GUID(IID_IPinnedListVista, 0xC3C6EB6D, 0xC837, 0x4EAE, 0xB1, 0x72, 0x5F, 0xEC, 0x52, 0xA2, 0xA4, 0xFD);
 DEFINE_GUID(IID_IPinnedList2, 0xBBD20037, 0xBC0E, 0x42F1, 0x91, 0x3F, 0xE2, 0x93, 0x6B, 0xB0, 0xEA, 0x0C);
 DEFINE_GUID(IID_IPinnedList25, 0x446BC432, 0x57E9, 0x4B72, 0x8E, 0x0F1, 0x0AF, 0x27, 0x11, 0x3D, 0x0CF, 0x9C);
 DEFINE_GUID(IID_IFlexibleTaskbarPinnedList, 0x60274fa2, 0x611f, 0x4b8a, 0xa2, 0x93, 0xf2, 0x7b, 0xf1, 0x03, 0xd1, 0x48);
@@ -184,4 +185,41 @@ private:
 	IPinManagerInterop* m_pinManager;
 
 	int m_build = 0;
+};
+
+MIDL_INTERFACE("C3C6EB6D-C837-4EAE-B172-5FEC52A2A4FD")
+IPinnedListVista : public IUnknown
+{
+public:
+	STDMETHOD(EnumObjects)(IEnumFullIDList**) PURE;
+	STDMETHOD(Modify)(PCIDLIST_ABSOLUTE, PCIDLIST_ABSOLUTE) PURE;
+	STDMETHOD(GetChangeCount)(ULONG*) PURE;
+	STDMETHOD(IsPinnable)(IDataObject*, int) PURE;
+	STDMETHOD(Resolve)(HWND, ULONG, PCIDLIST_ABSOLUTE, PIDLIST_ABSOLUTE*) PURE;
+	STDMETHOD(IsPinned)(PCIDLIST_ABSOLUTE) PURE;
+	STDMETHOD(GetPinnedItem)(PCIDLIST_ABSOLUTE, PIDLIST_ABSOLUTE*) PURE;
+};
+
+class CPinnedListVistaWrapper : public IPinnedListVista
+{
+public:
+	CPinnedListVistaWrapper(IUnknown*, int);
+	~CPinnedListVistaWrapper();
+
+	// IUnknown
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppvObject);
+	STDMETHODIMP_(ULONG) AddRef(void);
+	STDMETHODIMP_(ULONG) Release(void);
+
+	// IPinnedList (Vista)
+	STDMETHODIMP EnumObjects(IEnumFullIDList**);
+	STDMETHODIMP Modify(PCIDLIST_ABSOLUTE, PCIDLIST_ABSOLUTE);
+	STDMETHODIMP GetChangeCount(ULONG*);
+	STDMETHODIMP IsPinnable(IDataObject*, int);
+	STDMETHODIMP Resolve(HWND, ULONG, PCIDLIST_ABSOLUTE, PIDLIST_ABSOLUTE*);
+	STDMETHODIMP IsPinned(PCIDLIST_ABSOLUTE);
+	STDMETHODIMP GetPinnedItem(PCIDLIST_ABSOLUTE, PIDLIST_ABSOLUTE*);
+private:
+	CPinnedListWrapper* m_inner = nullptr;
+	long m_cRef = 1;
 };

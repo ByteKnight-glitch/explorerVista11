@@ -39,12 +39,93 @@
 #include "MinhookImports.h"
 #include "TypeDefinitions.h"
 
+#define WINX_HOTKEY_ID 0x5758
+
+void ShowCustomWinXMenu(HWND hwndTray)
+{
+	HMENU hMenu = CreatePopupMenu();
+	if (!hMenu) return;
+
+	AppendMenuW(hMenu, MF_STRING, 101, L"Programs and Features");
+	AppendMenuW(hMenu, MF_STRING, 102, L"Power Options");
+	AppendMenuW(hMenu, MF_STRING, 103, L"Event Viewer");
+	AppendMenuW(hMenu, MF_STRING, 104, L"System");
+	AppendMenuW(hMenu, MF_STRING, 105, L"Device Manager");
+	AppendMenuW(hMenu, MF_STRING, 106, L"Network Connections");
+	AppendMenuW(hMenu, MF_STRING, 107, L"Disk Management");
+	AppendMenuW(hMenu, MF_STRING, 108, L"Computer Management");
+	AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+	AppendMenuW(hMenu, MF_STRING, 109, L"Windows PowerShell");
+	AppendMenuW(hMenu, MF_STRING, 110, L"Command Prompt");
+	AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+	AppendMenuW(hMenu, MF_STRING, 111, L"Task Manager");
+	AppendMenuW(hMenu, MF_STRING, 112, L"Settings");
+	AppendMenuW(hMenu, MF_STRING, 113, L"File Explorer");
+	AppendMenuW(hMenu, MF_STRING, 114, L"Run");
+	AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+
+	HMENU hPowerMenu = CreatePopupMenu();
+	if (hPowerMenu)
+	{
+		AppendMenuW(hPowerMenu, MF_STRING, 201, L"Sign out");
+		AppendMenuW(hPowerMenu, MF_STRING, 202, L"Restart");
+		AppendMenuW(hPowerMenu, MF_STRING, 203, L"Shut down");
+		AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hPowerMenu, L"Shut down or sign out");
+	}
+
+	RECT rc = { 0 };
+	GetWindowRect(hwndTray, &rc);
+
+	SetForegroundWindow(hwndTray);
+	UINT cmd = TrackPopupMenuEx(
+		hMenu,
+		TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RETURNCMD | TPM_RIGHTBUTTON,
+		rc.left + 4,
+		rc.top,
+		hwndTray,
+		NULL
+	);
+	PostMessageW(hwndTray, WM_NULL, 0, 0);
+
+	DestroyMenu(hMenu);
+
+	switch (cmd)
+	{
+	case 101: ShellExecuteW(NULL, L"open", L"appwiz.cpl", NULL, NULL, SW_SHOWNORMAL); break;
+	case 102: ShellExecuteW(NULL, L"open", L"powercfg.cpl", NULL, NULL, SW_SHOWNORMAL); break;
+	case 103: ShellExecuteW(NULL, L"open", L"eventvwr.msc", NULL, NULL, SW_SHOWNORMAL); break;
+	case 104: ShellExecuteW(NULL, L"open", L"control.exe", L"/name Microsoft.System", NULL, SW_SHOWNORMAL); break;
+	case 105: ShellExecuteW(NULL, L"open", L"devmgmt.msc", NULL, NULL, SW_SHOWNORMAL); break;
+	case 106: ShellExecuteW(NULL, L"open", L"ncpa.cpl", NULL, NULL, SW_SHOWNORMAL); break;
+	case 107: ShellExecuteW(NULL, L"open", L"diskmgmt.msc", NULL, NULL, SW_SHOWNORMAL); break;
+	case 108: ShellExecuteW(NULL, L"open", L"compmgmt.msc", NULL, NULL, SW_SHOWNORMAL); break;
+	case 109: ShellExecuteW(NULL, L"open", L"powershell.exe", NULL, NULL, SW_SHOWNORMAL); break;
+	case 110: ShellExecuteW(NULL, L"open", L"cmd.exe", NULL, NULL, SW_SHOWNORMAL); break;
+	case 111: ShellExecuteW(NULL, L"open", L"taskmgr.exe", NULL, NULL, SW_SHOWNORMAL); break;
+	case 112: ShellExecuteW(NULL, L"open", L"ms-settings:", NULL, NULL, SW_SHOWNORMAL); break;
+	case 113: ShellExecuteW(NULL, L"open", L"C:\\Windows\\explorer.exe", L"/separate", NULL, SW_SHOWNORMAL); break;
+	case 114: ShellExecuteW(NULL, L"open", L"rundll32.exe", L"shell32.dll,#61", NULL, SW_SHOWNORMAL); break;
+	case 201: ShellExecuteW(NULL, L"open", L"shutdown.exe", L"/l", NULL, SW_HIDE); break;
+	case 202: ShellExecuteW(NULL, L"open", L"shutdown.exe", L"/r /t 0", NULL, SW_HIDE); break;
+	case 203: ShellExecuteW(NULL, L"open", L"shutdown.exe", L"/s /t 0", NULL, SW_HIDE); break;
+	}
+}
+
 LRESULT CALLBACK NewTrayProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (!g_dwTrayThreadId)
 	{
 		g_dwTrayThreadId = GetCurrentThreadId();
 		dbgprintf(L"set g_dwTrayThreadId from NewTrayProc to %u", g_dwTrayThreadId);
+	}
+	if (uMsg == WM_HOTKEY && wParam == WINX_HOTKEY_ID)
+	{
+		ShowCustomWinXMenu(hwnd);
+		return 0;
+	}
+	if (uMsg == WM_DESTROY)
+	{
+		UnregisterHotKey(hwnd, WINX_HOTKEY_ID);
 	}
 	if (uMsg == 0x56D) return 0;
 	if (uMsg == ThemeChangeMessage) //reinit thememanager on themechanged, so that inactive msstyles is updated
@@ -129,6 +210,7 @@ void ShimDesktop()
 	g_prevThumbnailProc = (WNDPROC)GetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC);
 	SetWindowLongPtr(hwndTray, GWLP_WNDPROC, (LONG_PTR)NewTrayProc);
 	SetWindowLongPtr(hwndThumbnail, GWLP_WNDPROC, (LONG_PTR)NewThumbnailProc);
+	RegisterHotKey(hwndTray, WINX_HOTKEY_ID, MOD_WIN, 'X');
 	//set monitor (doh!)
 	SetProp(hwndTray, L"TaskbarMonitor", (HANDLE)MonitorFromWindow(hwndTray, MONITOR_DEFAULTTOPRIMARY));
 	//init desktop	
@@ -612,8 +694,8 @@ extern "C" HRESULT WINAPI Explorer_CoCreateInstance(
 			result = CoCreateInstance(rclsid, pUnkOuter, dwClsContext, IID_IUserAssist102, ppv);
 		else
 		{
-			dbgprintf(L"Warning, unknown useraassist riid!!!!!");
-			dbgprintf(L"Warning, unknown useraassist riid!!!!!");
+			// Windows Vista IUserAssist fallback
+			result = CoCreateInstance(rclsid, pUnkOuter, dwClsContext, IID_IUserAssist10, ppv);
 		}
 	}
 
@@ -692,7 +774,10 @@ extern "C" HRESULT WINAPI Explorer_CoCreateInstance(
 
 		if (SUCCEEDED(result))
 		{
-			*ppv = new CPinnedListWrapper((IUnknown*)*ppv, build);
+			if (riid == IID_IPinnedListVista)
+				*ppv = new CPinnedListVistaWrapper((IUnknown*)*ppv, build);
+			else
+				*ppv = new CPinnedListWrapper((IUnknown*)*ppv, build);
 		}
 
 	}

@@ -218,3 +218,83 @@ HRESULT __stdcall CPinnedListWrapper::UpdateForRemovedItemsAsNecessary(VOID)
 		return m_pinnedList3->UpdateForRemovedItemsAsNecessary();
 	return S_OK;
 }
+
+CPinnedListVistaWrapper::CPinnedListVistaWrapper(IUnknown* flex, int build)
+{
+	m_cRef = 1;
+	m_inner = new CPinnedListWrapper(flex, build);
+}
+
+CPinnedListVistaWrapper::~CPinnedListVistaWrapper()
+{
+	if (m_inner)
+	{
+		m_inner->Release();
+		m_inner = nullptr;
+	}
+}
+
+HRESULT __stdcall CPinnedListVistaWrapper::QueryInterface(REFIID riid, void** ppvObject)
+{
+	if (!ppvObject)
+		return E_POINTER;
+
+	if (riid == IID_IUnknown || riid == IID_IPinnedListVista)
+	{
+		*ppvObject = static_cast<IPinnedListVista*>(this);
+		AddRef();
+		return S_OK;
+	}
+
+	return m_inner ? m_inner->QueryInterface(riid, ppvObject) : E_NOINTERFACE;
+}
+
+ULONG __stdcall CPinnedListVistaWrapper::AddRef(void)
+{
+	return InterlockedIncrement(&m_cRef);
+}
+
+ULONG __stdcall CPinnedListVistaWrapper::Release(void)
+{
+	ULONG ref = InterlockedDecrement(&m_cRef);
+	if (ref == 0)
+	{
+		delete this;
+	}
+	return ref;
+}
+
+HRESULT __stdcall CPinnedListVistaWrapper::EnumObjects(IEnumFullIDList** p1)
+{
+	return m_inner ? m_inner->EnumObjects(p1) : E_FAIL;
+}
+
+HRESULT __stdcall CPinnedListVistaWrapper::Modify(PCIDLIST_ABSOLUTE p1, PCIDLIST_ABSOLUTE p2)
+{
+	return m_inner ? m_inner->Modify(p1, p2) : E_FAIL;
+}
+
+HRESULT __stdcall CPinnedListVistaWrapper::GetChangeCount(ULONG* p1)
+{
+	return m_inner ? m_inner->GetChangeCount(p1) : E_FAIL;
+}
+
+HRESULT __stdcall CPinnedListVistaWrapper::IsPinnable(IDataObject* p1, int p2)
+{
+	return m_inner ? m_inner->IsPinnable(p1, p2) : E_FAIL;
+}
+
+HRESULT __stdcall CPinnedListVistaWrapper::Resolve(HWND p1, ULONG p2, PCIDLIST_ABSOLUTE p3, PIDLIST_ABSOLUTE* p4)
+{
+	return m_inner ? m_inner->Resolve(p1, p2, p3, p4) : E_FAIL;
+}
+
+HRESULT __stdcall CPinnedListVistaWrapper::IsPinned(PCIDLIST_ABSOLUTE p1)
+{
+	return m_inner ? m_inner->IsPinned(p1) : E_FAIL;
+}
+
+HRESULT __stdcall CPinnedListVistaWrapper::GetPinnedItem(PCIDLIST_ABSOLUTE p1, PIDLIST_ABSOLUTE* p2)
+{
+	return m_inner ? m_inner->GetPinnedItem(p1, p2) : E_FAIL;
+}
